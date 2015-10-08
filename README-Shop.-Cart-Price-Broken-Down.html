@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { font-family: arial, verdana, sans-serif; font-size: 15px; line-height: 26px; margin-right: 0;}
+  .instructions { margin-left: 30px; }
+  pre { background-color: #ccc; margin-left: 30px; padding: 12px 0 12px 22px; }
+
+  .heading { font-size: 20px; text-align: center; }
+  .file { padding: 15px 15px 15px 6px; background-color: #fcea23; }
+  .step { background-color: lightgreen; padding: 5px; }
+  .first { margin-top: 24px; }
+</style>
+</head>
+
+<body>
+
+<p>
+	Before installing a plugin, it is always recommend to make backup copies of all involved files!<br />
+
+	Currently, this Plugin/Addon is only compatible with <strong>Zen Cart</strong> v.<strong>1.5.4</strong>.<br />
+
+	I strongly recommend doing Manual installation! I.e. It is best to EDIT files of your own Zen-Cart store instead of REPLACE files.<br />
+
+	(But <u>if you're sure no other plugins are using the involved files</u> you may choose to copy/replace them. After a backup.)<br />
+
+	This Plugin does not require database changes.
+</p>
+
+
+<p class="heading">
+	<strong>[--------- Manual Installation [RECOMMENDED]. It's easy! Only change these 3 files! ---------]</strong>
+</p>
+
+<span class="file">
+	<span style="font-size: 26px; font-weight: bold;">- File 1:</span> &lt;site_folder&gt;/includes/classes/shopping_cart.php
+</span>
+
+<p class="instructions first">
+	<span class="step">STEP 1:</span> In shopping_cart.php there is only one class: shoppingCart. Insert the following function at the end of that class, right before the closing "}":
+</p>
+
+<pre>
+function attributes_indiv_prices( $products_id ){
+	global $db, $currencies;
+
+	$total_attributes_price = 0;
+	$qty = $this->contents[$products_id]['qty'];
+
+	$attr_indiv_prcs = array();
+
+	if (isset($this->contents[$products_id]['attributes'])) {
+
+		reset($this->contents[$products_id]['attributes']);
+
+		while ( list($option, $value) = each($this->contents[$products_id]['attributes']) ){
+			$attributes_price = 0;
+			$attribute_price_query = "select *
+                                   from " . TABLE_PRODUCTS_ATTRIBUTES . "
+                                   where products_id = '" . (int)$products_id . "'
+                                   and options_id = '" . (int)$option . "'
+                                   and options_values_id = '" . (int)$value . "'";
+
+			$attribute_price = $db->Execute($attribute_price_query);
+
+			$new_attributes_price = 0;
+			$discount_type_id = '';
+			$sale_maker_discount = '';
+			$pref = '';
+
+			if ( $attribute_price->fields['product_attribute_is_free'] == '1' and zen_get_products_price_is_free((int)$products_id) ){
+       			// no charge
+			}
+			else {
+				// + or blank adds
+				if ( $attribute_price->fields['price_prefix'] == '-' ){
+					$pref = '-';
+
+					if ( $attribute_price->fields['attributes_discounted'] == '1' ){
+						$discount_type_id = '';
+						$sale_maker_discount = '';
+						$new_attributes_price = zen_get_discount_calc($products_id, $attribute_price->fields['products_attributes_id'], $attribute_price->fields['options_values_price'], $qty);
+						$attributes_price -= ($new_attributes_price);
+					}
+					else {
+						$attributes_price -= $attribute_price->fields['options_values_price'];
+					}
+				}
+				else {
+					if ( $attribute_price->fields['attributes_discounted'] == '1' ){
+						// calculate proper discount for attributes
+						$discount_type_id = '';
+						$sale_maker_discount = '';
+						$new_attributes_price = zen_get_discount_calc($products_id, $attribute_price->fields['products_attributes_id'], $attribute_price->fields['options_values_price'], $qty);
+						$attributes_price += ($new_attributes_price);
+					}
+					else {
+						$attributes_price += $attribute_price->fields['options_values_price'];
+					}
+				}
+
+				$attr_indiv_prcs[count($attr_indiv_prcs)] = $pref . $attribute_price->fields['options_values_price'];
+			}
+
+			// Validate Attributes
+			if ($attribute_price->fields['attributes_display_only']) { // If an attribute was not selected (i.e. for exmp. the drop-down was left at "Please select color"), prevent going to the cart
+				$_SESSION['valid_to_checkout'] = false;
+				$_SESSION['cart_errors'] .= zen_get_products_name($attribute_price->fields['products_id'], $_SESSION['languages_id']) . ERROR_PRODUCT_OPTION_SELECTION . '&lt;br /&gt;';
+			}
+		}
+	}
+
+	return $attr_indiv_prcs;
+}
+</pre>
+
+
+<p class="instructions">
+	<span class="step">STEP 2:</span> Locate the function get_products (function get_products($check_for_valid_cart = false) {). In it find this line:
+</p>
+
+<pre>
+'final_price' => ($products_price + $this->attributes_price($products_id)),
+</pre>
+
+<p class="instructions">
+	and REPLACE it with these 2 lines:
+</p>
+
+<pre>
+'final_price' => $products_price,
+'attributes_prices' => ($this->attributes_indiv_prices($products_id)),
+</pre>
+
+
+<p>&nbsp;</p>
+
+
+<span class="file">
+	<span style="font-size: 26px; font-weight: bold;">- File 2:</span> &lt;site_folder&gt;/includes/modules/pages/shopping_cart/header_php.php
+</span>
+
+<p class="instructions first">
+	<span class="step">STEP 1:</span> Find this line:
+</p>
+
+<pre>
+if (isset($products[$i]['attributes']) && is_array($products[$i]['attributes'])) {
+</pre>
+
+<p class="instructions">
+	and right after it add:
+</p>
+
+<pre>
+$one_time_charges = array();
+</pre>
+
+<p class="instructions">
+	<span class="step">STEP 2:</span> Find this line:
+</p>
+
+<pre>
+$attrArray[$option]['price_prefix'] = $attributes_values->fields['price_prefix'];
+</pre>
+
+<p class="instructions">
+	and right after it add:
+</p>
+
+<pre>
+$one_time_charges[count($one_time_charges)] = $attributes_values->fields['attributes_price_onetime'];
+</pre>
+
+<p class="instructions">
+	<span class="step">STEP 3:</span> Find this code (2 lines):
+</p>
+
+<pre>
+$productsPriceEach = $currencies->format($ppe) . ($products[$i]['onetime_charges'] != 0 ? '&lt;br /&gt;' . $currencies->display_price($products[$i]['onetime_charges'], zen_get_tax_rate($products[$i]['tax_class_id']), 1) : '');
+$productsPriceTotal = $currencies->format($ppt) . ($products[$i]['onetime_charges'] != 0 ? '&lt;br /&gt;' . $currencies->display_price($products[$i]['onetime_charges'], zen_get_tax_rate($products[$i]['tax_class_id']), 1) : '');
+</pre>
+
+<p class="instructions">
+	and REPLACE both lines with the following block of code:
+</p>
+
+<pre>
+$attributes_totals = array();
+
+$productsPriceEach = $currencies->format($ppe);
+$productsPriceTotal = $currencies->format($ppt);
+  
+foreach ( $products[$i]['attributes_prices'] as $key=>$val ){
+	$at_idx = count($attributes_totals);
+	$attributes_totals[ $at_idx ] = $currencies->format( (($val * $products[$i]['quantity']) + $one_time_charges[ $key ]) );
+
+	if ( $attributes_totals[ $at_idx ] == "$0.00" ) $attributes_totals[ $at_idx ] = "&nbsp;";
+
+	$products[$i]['attributes_prices'][ $key ] = $currencies->format( $val );
+
+	if ( $products[$i]['attributes_prices'][ $key ] == "$0.00" ) $products[$i]['attributes_prices'][ $key ] = "&nbsp;";
+}
+
+foreach ( $one_time_charges as $key=>$val ){
+	$one_time_charges[ $key ] = $currencies->format( $val );
+	if ( $one_time_charges[ $key ] == "$0.00" ) $one_time_charges[ $key ] = "&nbsp;";
+}
+
+$attr_pr = implode("&lt;br style='margin-bottom: 11px;' /&gt;", $products[$i]['attributes_prices']);
+$one_time_charges = implode("&lt;br style='margin-bottom: 11px;' /&gt;", $one_time_charges);
+$attributes_totals = implode("&lt;br style='margin-bottom: 11px;' /&gt;", $attributes_totals);
+$attr_pr = str_replace("$-", "-$", $attr_pr);
+$attributes_totals = str_replace("$-", "-$", $attributes_totals);
+</pre>
+
+<p class="instructions">
+	<span class="step">STEP 4:</span> Near there, find:
+</p>
+
+<pre>
+$productArray[$i] = array('attributeHiddenField'=>$attributeHiddenField,
+</pre>
+
+<p class="instructions">
+	and add these 3 elements to that array:
+</p>
+
+<pre>
+'attributesPrices'=>$attr_pr,
+'oneTimeCharges'=>$one_time_charges,
+'attributesTotals'=>$attributes_totals
+</pre>
+
+<p class="instructions">
+	(Only the last element in the array doesn't need a comma after it. Plase observe commas as you're adding.)
+</p>
+
+
+<p>&nbsp;</p>
+
+
+<span class="file">
+	<span style="font-size: 26px; font-weight: bold;">- File 3:</span> &lt;site_folder&gt;/includes/templates/&lt;theme_folder&gt;/templates/tpl_shopping_cart_default.php
+</span>
+<br /><br />
+(If you're not using a theme then this is the file: &lt;site_folder&gt;/includes/templates/template_default/templates/tpl_shopping_cart_default.php)
+
+<p class="instructions first">
+	<span class="step">STEP 1:</span> Find this line:
+</p>
+
+
+<pre>
+&lt;th scope="col" id="scUnitHeading"&gt;&lt;?php echo TABLE_HEADING_PRICE; ?&gt;&lt;/th&gt;
+</pre>
+
+<p class="instructions">
+	and right after it add:
+</p>
+
+<pre>
+&lt;th scope="col"&gt;One-time charge&lt;/th&gt;
+</pre>
+
+<p class="instructions">
+	<span class="step">STEP 2:</span> Find these 2 lines:
+</p>
+
+<pre>
+&lt;td class="cartUnitDisplay"&gt;&lt;?php echo $product['productsPriceEach']; ?&gt;&lt;/td&gt;
+&lt;td class="cartTotalDisplay"&gt;&lt;?php echo $product['productsPrice']; ?&gt;&lt;/td&gt;
+</pre>
+
+<p class="instructions">
+	REPLACE them with:
+</p>
+
+<pre>
+&lt;td class="cartUnitDisplay price"&gt;
+	&lt;?php
+		echo $product['productsPriceEach'];
+	?&gt;
+&lt;/td&gt;
+&lt;td&gt;
+	&lt;!-- This empty cell is above the One-time charges --&gt;
+&lt;/td&gt;
+&lt;td class="cartTotalDisplay"&gt;
+	&lt;?php
+		echo $product['productsPrice'];
+	?&gt;
+&lt;/td&gt;
+</pre>
+
+<p class="instructions">
+	<span class="step">STEP 3:</span> Find this code:
+</p>
+
+<pre>
+&lt;?php
+	echo $product['attributeHiddenField'];
+	if (isset($product['attributes']) && is_array($product['attributes'])) {
+		echo '&lt;div class="cartAttribsList"&gt;';
+		echo '&lt;ul&gt;';
+		reset($product['attributes']);
+		foreach ($product['attributes'] as $option =&gt; $value) {
+?&gt;
+
+&lt;li&gt;&lt;?php echo $value['products_options_name'] . TEXT_OPTION_DIVIDER . nl2br($value['products_options_values_name']); ?&gt;&lt;/li&gt;
+
+&lt;?php
+		}
+	echo '&lt;/ul&gt;';
+	echo '&lt;/div&gt;';
+	}
+?&gt;
+</pre>
+
+<p class="instructions">
+	and DELETE it.
+</p>
+
+<p class="instructions">
+	<span class="step">STEP 4:</span> Find this code:
+</p>
+
+<pre>
+&lt;?php
+} // end foreach ($productArray as $product)
+?&gt;
+	&lt;!-- Finished loop through all products /--&gt;
+</pre>
+
+<p class="instructions">
+	and REPLACE it with:
+</p>
+
+<pre>
+&lt;?php
+	echo "&lt;tr&gt;&lt;td&gt;&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;td&gt;";
+	echo $product['attributeHiddenField'];
+
+	if ( isset($product['attributes']) && is_array($product['attributes']) ){
+		echo '&lt;div class="cartAttribsList"&gt;';
+		echo "&lt;ul style='margin-top: 4px'&gt;";
+		reset($product['attributes']);
+
+		foreach ( $product['attributes'] as $option =&gt; $value ){
+			echo "&lt;li style='margin-bottom: 12px'&gt;" . $value['products_options_name'] . TEXT_OPTION_DIVIDER . nl2br($value['products_options_values_name']) . "&lt;/li&gt;";
+		}
+
+		echo '&lt;/ul&gt;';
+		echo '&lt;/div&gt;';
+	} // #END# if ( isset($product['attributes']) && is_array($product['attributes']) ){
+
+	echo "&lt;/td&gt;&lt;td class='price'&gt;";
+
+	echo $product['attributesPrices'];
+
+	echo "&lt;/td&gt;&lt;td class='price'&gt;";
+
+	echo $product['oneTimeCharges'];
+
+	echo "&lt;/td&gt;&lt;td class='price'&gt;";
+
+	echo $product['attributesTotals'];
+
+	echo "&lt;/td&gt;&lt;td&gt;&lt;/td&gt;&lt;/tr&gt;";
+
+} // #END# foreach ($productArray as $product)
+?&gt;
+	&lt;!-- Finished loop through all products /--&gt;
+</pre>
+
+<p class="heading">
+	<strong>[--------- All set! Enjoy! ---------]</strong>
+</p>
+
+</body>
+</html>
